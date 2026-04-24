@@ -1,0 +1,206 @@
+import ctypes
+from ctypes import wintypes
+import time
+
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+# ======================
+# FastRelative 网格配置,全分辨率兼容,超出无影响
+# ======================
+FAST_RELATIVE_GRID_SIZE = 30  # 30x30像素网格
+_last_grid_x = None
+_last_grid_y = None
+_enable_fast_relative = False
+
+# ======================
+# 全局状态
+# ======================
+_key_state = {}
+_mouse_left_state = False
+_mouse_right_state = False
+_mouse_middle_state = False
+_wheel_last_delta = 0
+_last_mx, _last_my = None, None
+
+# ======================
+# 开启\关闭 FastRelative
+# ======================
+def enable_fast_relative():
+    """
+    启用快速鼠标移动检测功能
+    启用后,系统将获取屏幕分辨率,并将其划分成一个 30×30 像素的网格
+    只有当鼠标穿过网格线时,才会将移动坐标发送回,以优化程序性能
+    """
+    global _enable_fast_relative, _last_grid_x, _last_grid_y
+    _enable_fast_relative = True
+    _last_grid_x = None
+    _last_grid_y = None
+    print(f"[FastRelative] 已启用 | 网格 {FAST_RELATIVE_GRID_SIZE}px | 全分辨率兼容")
+
+def disable_fast_relative():
+    """
+    禁用快速鼠标移动检测功能后,返回信息会恢复正常,这样会更加准确,但也会变得更卡顿
+    """
+    global _enable_fast_relative
+    _enable_fast_relative = False
+    print("[FastRelative] 已关闭")
+
+# ======================
+# 键盘检测
+# ======================
+def check_key(vk=None):
+    """
+    监控键盘
+    传入特定的键码,然后仅检测该键
+    或者不传入任何参数,即可检测整个键盘
+    vk:十六进制键码
+    """
+    global _key_state
+
+    if vk is not None:
+        current = (user32.GetAsyncKeyState(vk) & 0x8000) != 0
+        prev = _key_state.get(vk, False)
+        _key_state[vk] = current
+        if current and not prev:
+            return "down"
+        elif not current and prev:
+            return "up"
+        return None
+
+    changes = []
+    for code in range(0x08, 0xFF + 1):
+        current = (user32.GetAsyncKeyState(code) & 0x8000) != 0
+        prev = _key_state.get(code, False)
+        _key_state[code] = current
+        if current and not prev:
+            print(f"[按键] 0x{code:02X} down")
+            changes.append((code, "down"))
+        elif not current and prev:
+            print(f"[按键] 0x{code:02X} up")
+            changes.append((code, "up"))
+    return changes
+
+# ======================
+# 鼠标按键
+# ======================
+def check_mouse_left_change():
+    """
+    监听左鼠标按钮的按下与松开动作，并输出"up"和"down"这两个信号
+    """
+    global _mouse_left_state
+    current = (user32.GetAsyncKeyState(0x01) & 0x8000) != 0
+    prev = _mouse_left_state
+    _mouse_left_state = current
+    return "down" if current and not prev else "up" if not current and prev else None
+
+def check_mouse_right_change():
+    """
+    监听右鼠标按钮的按下与松开动作，并输出"up"和"down"这两个信号
+    """
+    global _mouse_right_state
+    current = (user32.GetAsyncKeyState(0x02) & 0x8000) != 0
+    prev = _mouse_right_state
+    _mouse_right_state = current
+    return "down" if current and not prev else "up" if not current and prev else None
+
+def check_mouse_middle_change():
+    """
+    监听中鼠标按钮的按下与松开动作，并输出"up"和"down"这两个信号
+    """
+    global _mouse_middle_state
+    current = (user32.GetAsyncKeyState(0x04) & 0x8000) != 0
+    prev = _mouse_middle_state
+    _mouse_middle_state = current
+    return "down" if current and not prev else "up" if not current and prev else None
+
+# ======================
+# 鼠标滚轮
+# ======================
+def check_wheel_change():
+    """
+    监测鼠标滚轮的移动情况，并输出"向前","向后","停止"
+    """
+    global _wheel_last_delta
+    delta = user32.GetAsyncKeyState(0x02E) & 0xFFFF
+    change = None
+    if delta > 0 and _wheel_last_delta <= 0:
+        change = "forward"
+    elif delta < 0 and _wheel_last_delta >= 0:
+        change = "backward"
+    elif delta == 0 and _wheel_last_delta != 0:
+        change = "stop"
+    _wheel_last_delta = delta
+    return change
+
+# ======================
+# 鼠标相对移动, 仅当鼠标跨越 30px 网格线时返回坐标
+# ======================
+def get_mouse_relative():
+    """
+    监测鼠标的位置移动，每秒检测 50 次
+    x:横坐标
+    y:纵坐标
+    """
+    global _last_mx, _last_my, _last_grid_x, _last_grid_y
+
+    pt = POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    x, y = pt.x, pt.y
+
+    # 开启 FastRelative：网格模式（全分辨率兼容）
+    if _enable_fast_relative:
+        # 计算当前网格（任何坐标都能算，超出屏幕无影响）
+        gx = x // FAST_RELATIVE_GRID_SIZE
+        gy = y // FAST_RELATIVE_GRID_SIZE
+
+        if _last_grid_x is None:
+            _last_grid_x, _last_grid_y = gx, gy
+            _last_mx, _last_my = x, y
+            return 0, 0
+
+        # 只有跨越网格线才返回移动
+        if gx != _last_grid_x or gy != _last_grid_y:
+            dx = x - _last_mx
+            dy = y - _last_my
+            _last_mx, _last_my = x, y
+            _last_grid_x, _last_grid_y = gx, gy
+            return dx * 30, dy * 30
+        else:
+            return 0, 0
+
+    # 原始正常模式
+    else:
+        if _last_mx is None:
+            _last_mx, _last_my = x, y
+            return 0, 0
+        dx = x - _last_mx
+        dy = y - _last_my
+        _last_mx, _last_my = x, y
+        return dx, dy
+
+
+if __name__ == '__main__':
+    # 开启网格模式（任何屏幕直接用）
+    enable_fast_relative()
+    # disable_fast_relative()
+    # 循环监听
+    while True:
+        dx, dy = get_mouse_relative()
+        if dx or dy:
+            print("鼠标移动：", dx, dy)
+        time.sleep(0.01)
+
+        ml = check_mouse_left_change()
+        mr = check_mouse_right_change()
+        mm = check_mouse_middle_change()
+        wheel = check_wheel_change()
+        dx, dy = get_mouse_relative()
+
+        if ml: print("[鼠标] 左键", ml)
+        if mr: print("[鼠标] 右键", mr)
+        if mm: print("[鼠标] 中键", mm)
+        if wheel: print("[滚轮]", wheel)
+

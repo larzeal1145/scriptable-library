@@ -1,0 +1,288 @@
+import ctypes
+import ctypes.wintypes
+import sys
+import time
+
+
+# ==============================================
+# 管理员权限
+# ==============================================
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except:
+        return False
+
+
+def run_as_admin():
+    try:
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, " ".join(sys.argv), None, 1
+        )
+        sys.exit()
+    except Exception as e:
+        print("权限没拿到:", e)
+        sys.exit(1)
+
+def take_admin():
+    if not is_admin():
+         print("请求管理权限")
+         run_as_admin()
+
+# ==============================================
+# Windows API
+# ==============================================
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+# 鼠标事件
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_ABSOLUTE = 0x8000  # 绝对坐标
+
+# 键盘事件
+KEYEVENTF_KEYUP = 0x0002
+INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+
+
+# Windows 联合体结构体定义
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = (
+        ("dx", ctypes.c_long),
+        ("dy", ctypes.c_long),
+        ("mouseData", ctypes.wintypes.DWORD),
+        ("dwFlags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.wintypes.ULONG)),
+    )
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = (
+        ("wVk", ctypes.wintypes.WORD),
+        ("wScan", ctypes.wintypes.WORD),
+        ("dwFlags", ctypes.wintypes.DWORD),
+        ("time", ctypes.wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.wintypes.ULONG)),
+    )
+
+
+# 联合体：鼠标/键盘二选一
+class INPUT_UNION(ctypes.Union):
+    _fields_ = (
+        ("mi", MOUSEINPUT),
+        ("ki", KEYBDINPUT),
+    )
+
+
+class INPUT(ctypes.Structure):
+    _fields_ = (
+        ("type", ctypes.wintypes.DWORD),
+        ("u", INPUT_UNION),
+    )
+
+
+# 声明 SendInput 函数参数（64位系统必须）
+user32.SendInput.argtypes = [
+    ctypes.c_uint,
+    ctypes.POINTER(INPUT),
+    ctypes.c_int
+]
+user32.SendInput.restype = ctypes.c_uint
+
+
+# ==============================================
+# 鼠标操作（绝对坐标，用在大厅界面）
+# ==============================================
+def mouse_move(x, y):
+    screen_width = ctypes.windll.user32.GetSystemMetrics(0)
+    screen_height = ctypes.windll.user32.GetSystemMetrics(1)
+
+    # 绝对坐标转换（0~65535）
+    abs_x = int(x * 65535 / screen_width)
+    abs_y = int(y * 65535 / screen_height)
+
+    inp = INPUT()
+    inp.type = INPUT_MOUSE
+    inp.u.mi.dx = abs_x
+    inp.u.mi.dy = abs_y
+    inp.u.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+
+def mouse_click():
+    # 左键按下   # noqa
+    in_down = INPUT()
+    in_down.type = INPUT_MOUSE
+    in_down.u.mi.dwFlags = MOUSEEVENTF_LEFTDOWN
+    user32.SendInput(1, ctypes.byref(in_down), ctypes.sizeof(in_down))
+    time.sleep(0.02)
+    # 左键抬起
+    in_up = INPUT()
+    in_up.type = INPUT_MOUSE
+    in_up.u.mi.dwFlags = MOUSEEVENTF_LEFTUP
+    user32.SendInput(1, ctypes.byref(in_up), ctypes.sizeof(in_up))
+
+
+def mouse_right_click():
+    # 右键按下
+    in_down = INPUT()
+    in_down.type = INPUT_MOUSE
+    in_down.u.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN
+    user32.SendInput(1, ctypes.byref(in_down), ctypes.sizeof(in_down))
+    time.sleep(0.02)
+    # 右键抬起
+    in_up = INPUT()
+    in_up.type = INPUT_MOUSE
+    in_up.u.mi.dwFlags = MOUSEEVENTF_RIGHTUP
+    user32.SendInput(1, ctypes.byref(in_up), ctypes.sizeof(in_up))
+
+
+def mouse_middle_click():
+    # 中键按下
+    in_down = INPUT()
+    in_down.type = INPUT_MOUSE
+    in_down.u.mi.dwFlags = MOUSEEVENTF_MIDDLEDOWN  # 改这里
+    user32.SendInput(1, ctypes.byref(in_down), ctypes.sizeof(in_down))
+    time.sleep(0.02)
+    # 中键抬起
+    in_up = INPUT()
+    in_up.type = INPUT_MOUSE
+    in_up.u.mi.dwFlags = MOUSEEVENTF_MIDDLEUP      # 改这里
+    user32.SendInput(1, ctypes.byref(in_up), ctypes.sizeof(in_up))
+
+# ==========================
+# 鼠标长按
+# ==========================
+def mouse_left_down():
+    """左键按下（不抬起）"""
+    inp = INPUT()
+    inp.type = INPUT_MOUSE
+    inp.u.mi.dwFlags = MOUSEEVENTF_LEFTDOWN
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+def mouse_left_up():
+    """左键抬起"""
+    inp = INPUT()
+    inp.type = INPUT_MOUSE
+    inp.u.mi.dwFlags = MOUSEEVENTF_LEFTUP
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+def mouse_right_down():
+    """右键按下（不抬起）"""
+    inp = INPUT()
+    inp.type = INPUT_MOUSE
+    inp.u.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+def mouse_right_up():
+    """右键抬起"""
+    inp = INPUT()
+    inp.type = INPUT_MOUSE
+    inp.u.mi.dwFlags = MOUSEEVENTF_RIGHTUP
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+# ==============================================
+# 平滑移动------------------------------------------------------------------------弃用
+# ==============================================
+
+# ser32 = ctypes.WinDLL("user32", use_last_error=True)
+#
+# # 常量
+# MOUSE_INPUT = 0  # 原 INPUT_MOUSE
+# MOUSE_MOVE_RELATIVE = 0x0001  # 原 MOUSEEVENTF_MOVE
+#
+#
+# 重命名结构体
+# class MouseMoveData(ctypes.Structure):  # 原 MOUSEINPUT
+#     _fields_ = [
+#         ("dx", wintypes.LONG),
+#         ("dy", wintypes.LONG),
+#         ("mouseData", wintypes.DWORD),
+#         ("dwFlags", wintypes.DWORD),
+#         ("time", wintypes.DWORD),
+#         ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG)),
+#     ]
+#
+#
+# class InputData(ctypes.Structure):  # 原 INPUT
+#     _fields_ = [
+#         ("type", wintypes.DWORD),
+#         ("mouse", MouseMoveData),  # 字段名改了
+#     ]
+#
+#
+# 鼠标移动函数
+# def move_mouse(dx, dy):
+#     """基础：鼠标相对移动"""
+#     data = InputData()
+#     data.type = MOUSE_INPUT
+#
+#     data.mouse.dx = dx
+#     data.mouse.dy = dy
+#     data.mouse.dwFlags = MOUSE_MOVE_RELATIVE
+#
+#     user32.SendInput(1, ctypes.byref(data), ctypes.sizeof(InputData))
+#
+#
+# def move_mouse_smooth(dx, dy, duration=0.3, steps=50):
+#     step_dx = dx / steps
+#     step_dy = dy / steps
+#     delay = duration / steps
+#
+#     for _ in range(steps):
+#         move_mouse(int(round(step_dx)), int(round(step_dy)))
+#         time.sleep(delay)
+
+# ==============================================
+# 键盘操作
+# ==============================================
+
+# 瞬间按下
+def key_press(vk_code):
+    in_down = INPUT()
+    in_down.type = INPUT_KEYBOARD
+    in_down.u.ki.wVk = vk_code
+    user32.SendInput(1, ctypes.byref(in_down), ctypes.sizeof(in_down))
+    time.sleep(0.02)
+
+    in_up = INPUT()
+    in_up.type = INPUT_KEYBOARD
+    in_up.u.ki.wVk = vk_code
+    in_up.u.ki.dwFlags = KEYEVENTF_KEYUP
+    user32.SendInput(1, ctypes.byref(in_up), ctypes.sizeof(in_up))
+
+# 长按
+def key_down(vk_code):
+    in_down = INPUT()
+    in_down.type = INPUT_KEYBOARD
+    in_down.u.ki.wVk = vk_code
+    user32.SendInput(1, ctypes.byref(in_down), ctypes.sizeof(in_down))
+
+def key_up(vk_code):
+    in_up = INPUT()
+    in_up.type = INPUT_KEYBOARD
+    in_up.u.ki.wVk = vk_code
+    in_up.u.ki.dwFlags = KEYEVENTF_KEYUP
+    user32.SendInput(1, ctypes.byref(in_up), ctypes.sizeof(in_up))
+# ==============================================
+# 测试
+# ==============================================
+if __name__ == "__main__":
+    pass
+    # print("6秒后开始执行")
+    # time.sleep(6)
+    #
+    # # 瞬间移动鼠标 → 点击 → 等1秒 → 平滑移动鼠标 → 输入A → 回车
+    # mouse_move(500, 500)
+    # mouse_click()  #鼠标点击
+    # time.sleep(0.1)
+    # key_press(0x42)  #键盘
+    # mouse_left_down()
+    # time.sleep(3)
+    # mouse_left_up()
+    # key_press(VK_RETURN)
+

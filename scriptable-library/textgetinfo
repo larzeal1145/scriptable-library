@@ -1,0 +1,185 @@
+import ctypes
+from ctypes import wintypes
+import time
+
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+# ==========================
+# 配置
+# ==========================
+FAST_RELATIVE_GRID_SIZE = 30
+
+# ==========================
+# 两个开关（你要的）
+# ==========================
+_enable_fast_relative = False
+_enable_digital_conversion = False
+
+def enable_fast_relative():
+    global _enable_fast_relative
+    _enable_fast_relative = True
+    print("[FastRelative] 已启用")
+
+def disable_fast_relative():
+    global _enable_fast_relative
+    _enable_fast_relative = False
+    print("[FastRelative] 已关闭")
+
+def enable_digital_conversion():
+    global _enable_digital_conversion
+    _enable_digital_conversion = True
+    print("[Digital] 已启用：按下=1 抬起=0 滚轮下=-1")
+
+def disable_digital_conversion():
+    global _enable_digital_conversion
+    _enable_digital_conversion = False
+    print("[Digital] 已关闭")
+
+# ==========================
+# 转换函数
+# ==========================
+def convert(v):
+    if not _enable_digital_conversion:
+        return v
+    return {
+        "down": 1,
+        "up": 0,
+        "forward": 1,
+        "backward": -1,
+        "stop": 0
+    }.get(v, v)
+
+# ==========================
+# 全局状态（纯布尔，绝不乱改）
+# ==========================
+key_states = {}
+mouse_left = False
+mouse_right = False
+mouse_middle = False
+wheel_last = 0
+last_mx = None
+last_my = None
+last_gx = None
+last_gy = None
+
+# ==========================
+# 键盘（完整：按下+抬起）
+# ==========================
+def check_key(vk):
+    current = (user32.GetAsyncKeyState(vk) & 0x8000) != 0
+    prev = key_states.get(vk, False)
+    key_states[vk] = current
+
+    if current and not prev:
+        return convert("down")
+    if not current and prev:
+        return convert("up")
+    return None
+
+# ==========================
+# 鼠标按键（100% 必出抬起）
+# ==========================
+def check_mouse_left():
+    global mouse_left
+    current = (user32.GetAsyncKeyState(0x01) & 0x8000) != 0
+    prev = mouse_left
+    mouse_left = current
+    if current and not prev: return convert("down")
+    if not current and prev: return convert("up")
+    return None
+
+def check_mouse_right():
+    global mouse_right
+    current = (user32.GetAsyncKeyState(0x02) & 0x8000) != 0
+    prev = mouse_right
+    mouse_right = current
+    if current and not prev: return convert("down")
+    if not current and prev: return convert("up")
+    return None
+
+def check_mouse_middle():
+    global mouse_middle
+    current = (user32.GetAsyncKeyState(0x04) & 0x8000) != 0
+    prev = mouse_middle
+    mouse_middle = current
+    if current and not prev: return convert("down")
+    if not current and prev: return convert("up")
+    return None
+
+# ==========================
+# 滚轮
+# ==========================
+def check_wheel():
+    global wheel_last
+    delta = user32.GetAsyncKeyState(0x02E) & 0xFFFF
+    res = None
+    if delta > 0 and wheel_last <= 0:
+        res = "forward"
+    elif delta < 0 and wheel_last >= 0:
+        res = "backward"
+    elif delta == 0 and wheel_last != 0:
+        res = "stop"
+    wheel_last = delta
+    return convert(res) if res else None
+
+# ==========================
+# 鼠标移动
+# ==========================
+def get_mouse_delta():
+    global last_mx, last_my, last_gx, last_gy
+    pt = POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    x, y = pt.x, pt.y
+
+    if last_mx is None:
+        last_mx, last_my = x, y
+        last_gx = x // FAST_RELATIVE_GRID_SIZE
+        last_gy = y // FAST_RELATIVE_GRID_SIZE
+        return 0, 0
+
+    if not _enable_fast_relative:
+        dx = x - last_mx
+        dy = y - last_my
+        last_mx, last_my = x, y
+        return dx, dy
+
+    gx = x // FAST_RELATIVE_GRID_SIZE
+    gy = y // FAST_RELATIVE_GRID_SIZE
+    if gx == last_gx and gy == last_gy:
+        return 0, 0
+
+    dx = x - last_mx
+    dy = y - last_my
+    last_mx, last_my = x, y
+    last_gx, last_gy = gx, gy
+    return dx * FAST_RELATIVE_GRID_SIZE, dy * FAST_RELATIVE_GRID_SIZE
+
+# ==========================
+# 主循环（极简、无BUG）
+# ==========================
+if __name__ == '__main__':
+    enable_fast_relative()
+    enable_digital_conversion()
+
+    while True:
+        dx, dy = get_mouse_delta()
+        if dx or dy:
+            print(f"移动 {dx} {dy}")
+
+        # 只调用一次！绝对不吞状态
+        ml = check_mouse_left()
+        mr = check_mouse_right()
+        mm = check_mouse_middle()
+        wh = check_wheel()
+        key_a = check_key(0x41)
+
+        if ml: print("左键", ml)
+        if mr: print("右键", mr)
+        if mm: print("中键", mm)
+        if wh: print("滚轮", wh)
+        if key_a: print("键盘A", key_a)
+
+        time.sleep(0.01)

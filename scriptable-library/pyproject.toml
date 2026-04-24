@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+
+
+[project]
+name = "ssjjscript"
+version = "1.0"
+
+readme = "README.md"
+
+dependencies = ["pyautogui", "opencv-python",  "wheel", "keyboard", "mouse"]
+
+# 包的声明
+[tool.setuptools]
+packages = ["ssjjscript"]
